@@ -1,210 +1,175 @@
+extern crate itertools;
 /// Applies the math in annealing.rs to keyboard layouts.
-
-
 extern crate rand;
 
 use self::rand::random;
 use std::cmp::Ordering;
-use std::collections::LinkedList;
 
-use layout;
-use penalty;
-use annealing;
+use crate::annealing;
+use crate::app;
+use crate::layout;
+use crate::penalty;
+use crate::utils;
+use crate::Result;
 
-struct BestLayoutsEntry
-{
-	layout:  layout::Layout,
-	penalty: f64,
+#[derive(Debug, PartialEq, Clone)]
+struct BestLayoutsEntry {
+    penalty: f64,
+    layout: layout::Layout,
 }
 
-impl BestLayoutsEntry
-{
-	fn cmp(&self, other: &BestLayoutsEntry)
-	-> Ordering
-	{
-		match self.penalty.partial_cmp(&other.penalty) {
-			Some(ord) => ord,
-			None => Ordering::Equal
-		}
-	}
+impl PartialOrd for BestLayoutsEntry {
+    fn partial_cmp(&self, other: &BestLayoutsEntry) -> Option<Ordering> {
+        self.penalty.partial_cmp(&other.penalty)
+    }
 }
 
-pub fn simulate<'a>(
-	quartads:    &penalty::QuartadList<'a>,
-	len:          usize,
-	init_layout: &layout::Layout,
-	penalties:   &Vec<penalty::KeyPenalty<'a>>,
-	debug:        bool,
-	top_layouts:  usize,
-	num_swaps:    usize)
-{
-	let penalty = penalty::calculate_penalty(&quartads, len, init_layout, penalties, true);
+pub fn run<'a>(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
+    let init_penalty = config.layout.penalize_with_details(corpus);
 
-	if debug {
-		println!("Initial layout:");
-		print_result(init_layout, &penalty);
-	}
+    // Keep track of the best layouts we've encountered.
+    let mut best_layouts = utils::ConstrainedSortedList::new(config.top_layouts);
+    let entry = BestLayoutsEntry {
+        layout: config.layout.clone(),
+        penalty: init_penalty.scaled,
+    };
+    best_layouts.insert_maybe(&entry);
 
-	// Keep track of the best layouts we've encountered.
-	let mut best_layouts: LinkedList<BestLayoutsEntry> = LinkedList::new();
+    for n in 0..config.repetition {
+        println!("Started run {}/{}", n + 1, config.repetition);
 
-	let mut accepted_layout = init_layout.clone();
-	let mut accepted_penalty = penalty.1;
-	for i in annealing::get_simulation_range() {
-		// Copy and shuffle this iteration of the layout.
-		let mut curr_layout = accepted_layout.clone();
-		curr_layout.shuffle(random::<usize>() % num_swaps + 1);
+        let mut accepted_layout = config.layout.clone();
+        let mut accepted_penalty = init_penalty.scaled;
 
-		// Calculate penalty.
-		let curr_layout_copy = curr_layout.clone();
-		let penalty = penalty::calculate_penalty(&quartads, len, &curr_layout, penalties, false);
-		let scaled_penalty = penalty.1;
+        for i in annealing::get_simulation_range() {
+            // Copy and shuffle this iteration of the layout.
+            let mut curr_layout = accepted_layout.clone();
+            curr_layout.shuffle(random::<usize>() % config.swaps + 1);
 
-		// Probabilistically accept worse transitions; always accept better
-		// transitions.
-		if annealing::accept_transition(scaled_penalty - accepted_penalty, i) {
-			if debug {
-				println!("Iteration {} accepted with penalty {}", i, scaled_penalty);
-			}
+            // Calculate penalty.
+            let curr_penalty = curr_layout.penalize(corpus) / corpus.len as f64;
 
-			accepted_layout = curr_layout_copy.clone();
-			accepted_penalty = scaled_penalty;
+            // Probabilistically accept worse transitions; always accept better
+            // transitions.
+            if annealing::accept_transition(curr_penalty - accepted_penalty, i) {
+                if config.debug {
+                    println!(
+                        "Iteration {} accepted with penalty {}. Current: {}",
+                        i, curr_penalty, accepted_penalty
+                    );
+                }
 
-			// Insert this layout into best layouts.
-			let new_entry = BestLayoutsEntry {
-				layout: curr_layout_copy,
-				penalty: penalty.1,
-			};
-			best_layouts = list_insert_ordered(best_layouts, new_entry);
+                // Maybe insert this layout into best layouts.
+                let entry = BestLayoutsEntry {
+                    layout: curr_layout,
+                    penalty: curr_penalty,
+                };
+                best_layouts.insert_maybe(&entry);
 
-			// Limit best layouts list length.
-			while best_layouts.len() > top_layouts {
-				best_layouts.pop_back();
-			}
-		}
-	}
+                accepted_layout = entry.layout;
+                accepted_penalty = curr_penalty;
+            } else {
+                if config.debug {
+                    println!(
+                        "Iteration {} not accepted with penalty {}. Current: {}",
+                        i, curr_penalty, accepted_penalty
+                    );
+                }
+            }
+        }
+    }
 
-	for entry in best_layouts.into_iter() {
-		let layout = entry.layout;
-		let penalty = penalty::calculate_penalty(&quartads, len, &layout, penalties, true);
-		println!("");
-		print_result(&layout, &penalty);
-	}
+    println!("Initial layout:");
+    println!("{}", config.layout);
+    println!("{}", init_penalty);
+    println!("");
+
+    println!("BestLayouts:");
+    for (i, bl) in best_layouts.iter().enumerate() {
+        let BestLayoutsEntry { layout, .. } = bl;
+        println!("");
+        println!("Place {}:", i + 1);
+        println!("{}", layout);
+        println!("{}", layout.penalize_with_details(corpus));
+    }
+
+    Ok(())
 }
 
-pub fn refine<'a>(
-	quartads:    &penalty::QuartadList<'a>,
-	len:          usize,
-	init_layout: &layout::Layout,
-	penalties:   &Vec<penalty::KeyPenalty<'a>>,
-	debug:        bool,
-	top_layouts:  usize,
-	num_swaps:    usize)
-{
-	let penalty = penalty::calculate_penalty(&quartads, len, init_layout, penalties, true);
+pub fn refine<'a>(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
+    let mut curr_layout = config.layout.clone();
+    let mut curr_penalty = curr_layout.penalize(corpus);
 
-	println!("Initial layout:");
-	print_result(init_layout, &penalty);
+    println!(
+        "Start refining with {} swaps and initial layout:",
+        config.swaps
+    );
+    println!("{}", curr_layout);
+    println!("{}", curr_layout.penalize_with_details(corpus));
 
-	let mut curr_layout = init_layout.clone();
-	let mut curr_penalty = penalty.1;
+    let mut permutations = layout::LayoutPermutations::from_config(&config);
 
-	loop {
-		// Test every layout within `num_swaps` swaps of the initial layout.
-		let mut best_layouts: LinkedList<BestLayoutsEntry> = LinkedList::new();
-		let permutations = layout::LayoutPermutations::new(init_layout, num_swaps);
-		for (i, layout) in permutations.enumerate() {
-			let penalty = penalty::calculate_penalty(&quartads, len, &layout, penalties, false);
+    let mut count = 0;
+    loop {
+        count += 1;
 
-			if debug {
-				println!("Iteration {}: {}", i, penalty.1);
-			}
+        // Test every layout within `num_swaps` swaps of the initial layout.
+        let mut best_layout = curr_layout.clone();
+        let mut best_penalty = curr_layout.penalize(corpus);
 
-			// Insert this layout into best layouts.
-			let new_entry = BestLayoutsEntry {
-				layout: layout,
-				penalty: penalty.1,
-			};
-			best_layouts = list_insert_ordered(best_layouts, new_entry);
+        permutations.set_layout(&curr_layout);
+        for (i, layout) in permutations.iter().enumerate() {
+            let penalty = layout.penalize(corpus);
 
-			// Limit best layouts list length.
-			while best_layouts.len() > top_layouts {
-				best_layouts.pop_back();
-			}
-		}
+            if config.debug {
+                println!("Iteration {}: {}", i, penalty);
+            }
 
-		// Print the top layouts.
-		for entry in best_layouts.iter() {
-			let ref layout = entry.layout;
-			let penalty = penalty::calculate_penalty(&quartads, len, &layout, penalties, true);
-			println!("");
-			print_result(&layout, &penalty);
-		}
+            if penalty <= best_penalty {
+                best_layout = layout;
+                best_penalty = penalty;
+            }
+        }
 
-		// Keep going until swapping doesn't get us any more improvements.
-		let best = best_layouts.pop_front().unwrap();
-		if curr_penalty <= best.penalty {
-			break;
-		} else {
-			curr_layout = best.layout;
-			curr_penalty = best.penalty;
-		}
-	}
+        // Keep going until swapping doesn't get us any more improvements.
+        if curr_penalty <= best_penalty {
+            break;
+        } else {
+            println!("Result of iteration {}:", count);
+            println!("{}", best_layout);
+            println!("{}", best_layout.penalize_with_details(corpus));
 
-	println!("");
-	println!("Ultimate winner:");
-	println!("{}", curr_layout);
+            curr_layout = best_layout;
+            curr_penalty = best_penalty;
+        }
+    }
+
+    println!("");
+    println!("Ultimate winner:");
+    println!("{}", curr_layout);
+    println!("{}", curr_layout.penalize_with_details(corpus));
+    Ok(())
 }
 
-pub fn print_result<'a>(
-	layout: &'a layout::Layout,
-	penalty: &'a (f64, f64, Vec<penalty::KeyPenaltyResult<'a>>))
-{
-	println!("{}", layout);
+pub fn run_refs(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
+    let penalize_and_print = |name, layout: &layout::Layout| {
+        println!("");
+        let penalty = layout.penalize_with_details(corpus);
+        println!("Reference: {}", name);
+        println!("{}", layout);
+        println!("{}", penalty);
+    };
 
-	let (ref total, ref scaled, ref penalties) = *penalty;
-	println!("total: {}; scaled: {}", total, scaled);
-	for penalty in penalties {
-		print!("{}  / ", penalty);
-		let mut high_keys: Vec<(&str, f64)> = penalty.high_keys.iter().map(|x| (*x.0, *x.1)).collect();
-		high_keys.sort_by(|a, b|
-			match b.1.abs().partial_cmp(&a.1.abs()) {
-				Some(c) => c,
-				None => Ordering::Equal
-			});
-		for key in high_keys.iter().take(5) {
-			let (k, v) = *key;
-			print!(" {}: {};", k, v);
-		}
-		println!("");
-	}
-}
-
-// Take ownership of the list and give it back as a hack to make the borrow checker happy :^)
-fn list_insert_ordered(mut list: LinkedList<BestLayoutsEntry>, entry: BestLayoutsEntry)
--> LinkedList<BestLayoutsEntry>
-{
-	{
-		// Find where to add our new entry to, since the list is sorted.
-		let mut iter = list.iter_mut();
-		loop {
-			{
-				let opt_next = iter.peek_next();
-				if let Some(next) = opt_next {
-					let cmp = entry.cmp(next);
-					if cmp == Ordering::Less {
-						break;
-					}
-				} else {
-					break;
-				}
-			}
-
-			iter.next();
-		}
-
-		// Add to list.
-		iter.insert_next(entry);
-	}
-	list
+    penalize_and_print("QWERTY", &layout::QWERTY_LAYOUT);
+    // penalize_and_print("DVORAK",&layout::DVORAK_LAYOUT);
+    penalize_and_print("COLEMAK", &layout::COLEMAK_LAYOUT);
+    // penalize_and_print("QGMLWY", &layout::QGMLWY_LAYOUT);
+    penalize_and_print("WORKMAN", &layout::WORKMAN_LAYOUT);
+    // penalize_and_print("MALTRON",&layout::MALTRON_LAYOUT);
+    penalize_and_print("MTGAP", &layout::MTGAP_LAYOUT);
+    // penalize_and_print("CAPEWELL",&layout::CAPEWELL_LAYOUT);
+    // penalize_and_print("ARENSITO",&layout::ARENSITO_LAYOUT);
+    penalize_and_print("RSTHD", &layout::RSTHD_LAYOUT);
+    penalize_and_print("INIT", &config.layout);
+    Ok(())
 }

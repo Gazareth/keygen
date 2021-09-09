@@ -2,11 +2,24 @@
 name = "keygen"
 version = "0.1.0"
 authors = ["Xuming Zeng <xsznix@gmail.com>"]
+edition = "2018"
 
 [dependencies]
 rand = "0.3"
-getopts = "0.2"
+clap = "2.33"
+itertools = "0.10"
+strum = "0.21"
+strum_macros = "0.21"
 
 [profile.dev]
 opt-level = 3
 debug = true
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+
+
+
