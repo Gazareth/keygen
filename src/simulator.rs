@@ -3,6 +3,8 @@ extern crate itertools;
 extern crate rand;
 
 use self::rand::random;
+use rayon::iter::ParallelBridge;
+use rayon::prelude::*;
 use std::cmp::Ordering;
 
 use crate::annealing;
@@ -47,7 +49,7 @@ pub fn run<'a>(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
             curr_layout.shuffle(random::<usize>() % config.swaps + 1);
 
             // Calculate penalty.
-            let curr_penalty = curr_layout.penalize(corpus) / corpus.len as f64;
+            let curr_penalty = curr_layout.par_penalize(corpus) / corpus.len as f64;
 
             // Probabilistically accept worse transitions; always accept better
             // transitions.
@@ -87,6 +89,9 @@ pub fn run<'a>(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
     println!("BestLayouts:");
     for (i, bl) in best_layouts.iter().enumerate() {
         let BestLayoutsEntry { layout, .. } = bl;
+        if i == 0 {
+            layout.write_to_file(&"winner.layout")?;
+        }
         println!("");
         println!("Place {}:", i + 1);
         println!("{}", layout);
@@ -114,22 +119,16 @@ pub fn refine<'a>(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> 
         count += 1;
 
         // Test every layout within `num_swaps` swaps of the initial layout.
-        let mut best_layout = curr_layout.clone();
-        let mut best_penalty = curr_layout.penalize(corpus);
-
         permutations.set_layout(&curr_layout);
-        for (i, layout) in permutations.iter().enumerate() {
-            let penalty = layout.penalize(corpus);
-
-            if config.debug {
-                println!("Iteration {}: {}", i, penalty);
-            }
-
-            if penalty <= best_penalty {
-                best_layout = layout;
-                best_penalty = penalty;
-            }
-        }
+        let (best_layout, best_penalty) = permutations
+            .iter()
+            .par_bridge()
+            .map(|layout| {
+                let penalty = layout.penalize(corpus);
+                (layout, penalty)
+            })
+            .min_by(|(_, p1), (_, p2)| p1.partial_cmp(&p2).unwrap())
+            .unwrap();
 
         // Keep going until swapping doesn't get us any more improvements.
         if curr_penalty <= best_penalty {
@@ -148,6 +147,7 @@ pub fn refine<'a>(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> 
     println!("Ultimate winner:");
     println!("{}", curr_layout);
     println!("{}", curr_layout.penalize_with_details(corpus));
+    curr_layout.write_to_file(&"refined.layout")?;
     Ok(())
 }
 

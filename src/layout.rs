@@ -1,8 +1,12 @@
 #![allow(dead_code)]
+use crate::Result;
 use itertools::Itertools;
 use rand::random;
 /// Data structures and methods for creating and shuffling keyboard layouts.
 use std::fmt::{self, Display};
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
 
 // KeyMap format:
 //    LEFT HAND   |    RIGHT HAND
@@ -274,6 +278,27 @@ impl From<&Layout> for LayoutPosMap {
 }
 
 impl Layout {
+    #[rustfmt::skip]
+    pub fn write_to_file<P: AsRef<Path>>(&self, path: &P) -> Result<()> {
+        let mut file = File::create(path)?;
+
+        let lower = self.0.0.0;
+        let upper = self.1.0.0;
+        write!(file, "{}{}{}{}{} {}{}{}{}{}\n{}{}{}{}{} {}{}{}{}{}\n{}{}{}{}{} {}{}{}{}{}\n    {} {}\n",
+            lower[0],  lower[1],  lower[2],  lower[3],  lower[4],  lower[5],  lower[6],  lower[7],  lower[8],  lower[9],
+            lower[10], lower[11], lower[12], lower[13], lower[14], lower[15], lower[16], lower[17], lower[18], lower[19],
+            lower[20], lower[21], lower[22], lower[23], lower[24], lower[25], lower[26], lower[27], lower[28], lower[29],
+            lower[30], lower[31],
+        )?;
+        write!(file, "{}{}{}{}{} {}{}{}{}{}\n{}{}{}{}{} {}{}{}{}{}\n{}{}{}{}{} {}{}{}{}{}\n    {} {}\n",
+            upper[0],  upper[1],  upper[2],  upper[3],  upper[4],  upper[5],  upper[6],  upper[7],  upper[8],  upper[9],
+            upper[10], upper[11], upper[12], upper[13], upper[14], upper[15], upper[16], upper[17], upper[18], upper[19],
+            upper[20], upper[21], upper[22], upper[23], upper[24], upper[25], upper[26], upper[27], upper[28], upper[29],
+            upper[30], upper[31],
+        )?;
+        Ok(())
+    }
+
     pub fn from_string(s: &str) -> Option<Layout> {
         let s: Vec<char> = s.chars().collect();
         let mut lower: [char; 32] = ['\0'; 32];
@@ -375,7 +400,7 @@ impl LayoutPermutations {
         self.orig_layout = layout.clone();
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Layout> + 'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Layout> + Send + 'a {
         self.swaps
             .iter()
             .permutations(self.swaps_per_iteration)

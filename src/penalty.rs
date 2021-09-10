@@ -6,11 +6,11 @@
 pub static INIT_LAYOUT: &Layout = &layout::RSTHD_LAYOUT;
 
 // Base penalty.
-const BASE_PENALTY_MULTIPLICATOR: f64 = 3.0;
+const BASE_PENALTY_MULTIPLICATOR: f64 = 1.0;
 static BASE_PENALTY: KeyMap<f64> = KeyMap([
     2.5, 0.5, 0.5, 1.0, 2.5, 2.5, 1.0, 0.5, 0.5, 2.5, //
-    0.5, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.5, //
-    1.0, 1.5, 1.0, 0.5, 3.0, 3.0, 0.5, 1.0, 1.5, 1.0, //
+    1.0, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0, 1.0, //
+    1.5, 1.5, 1.0, 0.5, 3.0, 3.0, 0.5, 1.0, 1.5, 1.5, //
     0.0, 0.0,
 ]);
 //
@@ -33,6 +33,9 @@ const LONG_JUMP_CONSECUTIVE_PENALTY: Option<f64> = Some(5.0);
 //
 // TODO
 const RING_STRETCH_PENALTY: Option<f64> = Some(20.0);
+//
+// Penalise if pinky follows ring finger (inprecise)
+const PINKY_RING_PENALTY: Option<f64> = Some(5.0);
 //
 // Penalise 10 points for awkward pinky/ring combination where the pinky
 // reaches above the ring finger, e.g. QA/AQ, PL/LP, ZX/XZ, ;./.; on Qwerty.
@@ -58,11 +61,11 @@ const ROLL_IN_PENALTY: Option<f64> = Some(-0.125);
 // Penalise 3 points for using the same finger on different keys
 // with one key in between ("detached same finger bigram").
 // An extra 3 points for each usage of the center row.
-const SFB_SANDWICH_PENALTY: Option<f64> = Some(8.0);
+const SFB_SANDWICH_PENALTY: Option<f64> = Some(10.0);
 //
 // Penalise 3 points for jumping from top to bottom row or from bottom to
 // top row on the same finger with a keystroke in between.
-const LONG_JUMP_SANDWICH_PENALTY: Option<f64> = Some(4.0);
+const LONG_JUMP_SANDWICH_PENALTY: Option<f64> = Some(5.0);
 //
 // Penalise 10 points for three consecutive keystrokes going up or down
 // (currently only down) the three rows of the keyboard in a roll.
@@ -72,6 +75,7 @@ const TWIST_PENALTY: Option<f64> = Some(10.0);
  * Configuration end *
  *********************/
 
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::ops::Range;
@@ -139,12 +143,28 @@ impl<'a> From<&'a str> for Corpus<'a> {
 }
 
 impl Layout {
-    #[inline]
+    #[inline(always)]
     pub fn penalize(&self, corpus: &Corpus) -> f64 {
         let pos_map = self.get_position_map();
         corpus
             .quartads
             .iter()
+            .map(|(quartad, &count)| {
+                let mut total = TotalPenalty::new();
+                let kp_quartad = quartad.get_kp_quartad(&pos_map)?;
+                penalize_kp_quartad(&kp_quartad, &mut total);
+                Some(count as f64 * total.value)
+            })
+            .flatten()
+            .sum()
+    }
+
+    #[inline(always)]
+    pub fn par_penalize(&self, corpus: &Corpus) -> f64 {
+        let pos_map = self.get_position_map();
+        corpus
+            .quartads
+            .par_iter()
             .map(|(quartad, &count)| {
                 let mut total = TotalPenalty::new();
                 let kp_quartad = quartad.get_kp_quartad(&pos_map)?;
@@ -237,6 +257,7 @@ where
         total_penalty.add(penalties::long_jump(&kp_quartad));
         total_penalty.add(penalties::long_jump_hand(&kp_quartad));
         total_penalty.add(penalties::long_jump_consecutive(&kp_quartad));
+        total_penalty.add(penalties::pinky_ring(&kp_quartad));
         total_penalty.add(penalties::pinky_ring_twist(&kp_quartad));
         total_penalty.add(penalties::roll_out(&kp_quartad));
         total_penalty.add(penalties::roll_in(&kp_quartad));
@@ -267,6 +288,7 @@ pub enum PenaltyVar {
     LongJump,
     LongJumpHand,
     LongJumpConsecutive,
+    PinkyRing,
     PinkyRingTwist,
     RollOut,
     RollIn,
@@ -288,6 +310,7 @@ impl Display for PenaltyVar {
             LongJump => write!(f, "{}", "Long Jump"),
             LongJumpHand => write!(f, "{}", "Long Jump Hand"),
             LongJumpConsecutive => write!(f, "{}", "Long Jump Consecutive"),
+            PinkyRing => write!(f, "{}", "Pinky Follows Ring"),
             PinkyRingTwist => write!(f, "{}", "Pinky Ring Twist"),
             RollOut => write!(f, "{}", "Roll Out"),
             RollIn => write!(f, "{}", "Roll In"),
@@ -295,9 +318,9 @@ impl Display for PenaltyVar {
             RollReversal => write!(f, "{}", "Roll Reversal"),
             Twist => write!(f, "{}", "Twist"),
             SameFingerSandwich => write!(f, "{}", "Same Finger Sandwich"),
-            LongJumpSandwich => write!(f, "{}", "Long Jump"),
-            SameHand => write!(f, "{}", "Same"),
-            AlternatingHand => write!(f, "{}", "AlternatingHand"),
+            LongJumpSandwich => write!(f, "{}", "Long Jump Sandwich"),
+            SameHand => write!(f, "{}", "Same Hand"),
+            AlternatingHand => write!(f, "{}", "Alternating Hand"),
         }
     }
 }
@@ -393,6 +416,21 @@ mod penalties {
                 } else {
                     None
                 }
+            } else {
+                None
+            },
+        }
+    }
+
+    #[inline(always)]
+    pub fn pinky_ring(kp_quartad: &KeyPressQuartad) -> Penalty {
+        // Assumes curr.hand == old1.hand
+        let KeyPressQuartad { curr, old1, .. } = kp_quartad;
+        Penalty {
+            kind: PinkyRing,
+            relevant_keys: 2,
+            value: if curr.finger == Finger::Pinky && old1.finger == Finger::Ring {
+                PINKY_RING_PENALTY
             } else {
                 None
             },

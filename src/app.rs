@@ -86,7 +86,7 @@ impl Config {
                 "rsthd" => layout::RSTHD_LAYOUT.clone(),
                 "workman" => layout::WORKMAN_LAYOUT.clone(),
                 _ => {
-                    let s = crate::read_file(&path)?;
+                    let s = std::fs::read_to_string(&path)?;
                     Layout::from_string(&s)
                         .ok_or(format!("File {} does not contain a valid layout.", path))?
                 }
