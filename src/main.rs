@@ -1,11 +1,8 @@
-#![feature(linked_list_cursors)]
-
 mod annealing;
 mod app;
 mod layout;
 mod penalty;
 mod simulator;
-mod utils;
 
 use app::{Command, Config};
 use penalty::Corpus;
@@ -31,6 +28,7 @@ fn run() -> Result<()> {
         Command::Run => simulator::run(&corpus, &config)?,
         Command::RunRefs => simulator::run_refs(&corpus, &config)?,
         Command::Refine => simulator::refine(&corpus, &config)?,
+        Command::Analyze => simulator::analyze(&corpus)?,
     };
     Ok(())
 }

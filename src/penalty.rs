@@ -9,18 +9,18 @@ pub static INIT_LAYOUT: &Layout = &layout::RSTHD_LAYOUT;
 const BASE_PENALTY_MULTIPLICATOR: f64 = 1.0;
 static BASE_PENALTY: KeyMap<f64> = KeyMap([
     2.5, 0.5, 0.5, 1.0, 2.5, 2.5, 1.0, 0.5, 0.5, 2.5, //
-    1.0, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0, 1.0, //
+    0.5, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.5, //
     1.5, 1.5, 1.0, 0.5, 3.0, 3.0, 0.5, 1.0, 1.5, 1.5, //
     0.0, 0.0,
 ]);
 //
-// Penalise 5 points for using the same finger twice on different keys.
-// An extra 5 points for each usage of the center row.
-const SAME_FINGER_PENALTY: Option<f64> = Some(10.0);
+// Penalise 30 points for using the same finger twice on different keys.
+// An extra penalty of the same amount for each usage of the center row.
+const SAME_FINGER_PENALTY: Option<f64> = Some(30.0);
 //
-// Penalise 10 points for jumping from top to bottom row or from bottom to
+// Penalise 30 points for jumping from top to bottom row or from bottom to
 // top row on the same finger.
-const LONG_JUMP_PENALTY: Option<f64> = Some(5.0);
+const LONG_JUMP_PENALTY: Option<f64> = Some(30.0);
 //
 // Penalise 1 point for jumping from top to bottom row or from bottom to
 // top row on the same hand.
@@ -31,11 +31,13 @@ const LONG_JUMP_HAND_PENALTY: Option<f64> = Some(1.0);
 // index finger-bottom row.
 const LONG_JUMP_CONSECUTIVE_PENALTY: Option<f64> = Some(5.0);
 //
-// TODO
-const RING_STRETCH_PENALTY: Option<f64> = Some(20.0);
+// Penalise 10 points if the ring finger is sandwiched in between
+// the pinky and middle finger but streched out farther than those
+// two (for example AWD and KO; on Qwerty)
+const RING_STRETCH_PENALTY: Option<f64> = Some(10.0);
 //
-// Penalise if pinky follows ring finger (inprecise)
-const PINKY_RING_PENALTY: Option<f64> = Some(5.0);
+// Penalise 1 point if the pinky follows the ring finger (inprecise movement)
+const PINKY_RING_PENALTY: Option<f64> = Some(1.0);
 //
 // Penalise 10 points for awkward pinky/ring combination where the pinky
 // reaches above the ring finger, e.g. QA/AQ, PL/LP, ZX/XZ, ;./.; on Qwerty.
@@ -58,18 +60,27 @@ const ROLL_OUT_PENALTY: Option<f64> = Some(0.125);
 // Award 0.125 points for rolling inwards.
 const ROLL_IN_PENALTY: Option<f64> = Some(-0.125);
 //
-// Penalise 3 points for using the same finger on different keys
+// Penalise 5 points for using the same finger on different keys
 // with one key in between ("detached same finger bigram").
-// An extra 3 points for each usage of the center row.
-const SFB_SANDWICH_PENALTY: Option<f64> = Some(10.0);
+// An extra penalty of the same amount for each usage of the center row.
+const SFB_SANDWICH_PENALTY: Option<f64> = Some(5.0);
 //
-// Penalise 3 points for jumping from top to bottom row or from bottom to
+// Penalise 10 points for jumping from top to bottom row or from bottom to
 // top row on the same finger with a keystroke in between.
-const LONG_JUMP_SANDWICH_PENALTY: Option<f64> = Some(5.0);
+const LONG_JUMP_SANDWICH_PENALTY: Option<f64> = Some(10.0);
 //
 // Penalise 10 points for three consecutive keystrokes going up or down
-// (currently only down) the three rows of the keyboard in a roll.
+//  (currently only down)the three rows of the keyboard in a roll.
 const TWIST_PENALTY: Option<f64> = Some(10.0);
+//
+// Mask for which keys are allowed to be shuffled around
+#[rustfmt::skip]
+pub const LAYOUT_MASK: KeyMap<bool> = KeyMap([
+	true,  true,  true,  true,  true,  true,  true,  true,  true,  true,
+	true,  true,  true,  true,  true,  true,  true,  true,  true,  true,
+	true,  true,  true,  true,  true,  true,  true,  true,  true,  true,
+                                true,  true,
+]);
 
 /*********************
  * Configuration end *
@@ -85,7 +96,7 @@ use std::vec::Vec;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use crate::layout::{self, Finger, KeyMap, KeyPress, Layout, LayoutPosMap, Row};
+use crate::layout::{self, Finger, Hand, KeyMap, KeyPress, Layout, LayoutPosMap, Row};
 
 pub struct KeyPressQuartad<'a> {
     curr: &'a KeyPress,
@@ -135,10 +146,9 @@ impl<'a> From<&'a str> for Corpus<'a> {
             }
         }
 
-        Corpus {
-            len: string.len(),
-            quartads,
-        }
+        let len = quartads.iter().map(|(_, count)| count).sum();
+
+        Corpus { len, quartads }
     }
 }
 
@@ -180,6 +190,7 @@ impl Layout {
 
         let mut total = 0.0;
         let mut high_keys: HashMap<PenaltyVar, HashMap<&'a str, f64>> = HashMap::new();
+        let mut usage = HashMap::new();
 
         corpus
             .quartads
@@ -193,15 +204,25 @@ impl Layout {
             })
             .flatten()
             .for_each(|details| {
-                details.value.into_iter().for_each(|(pen, (s, v))| {
-                    let pen_high_keys = high_keys.entry(pen).or_insert(HashMap::new());
+                details.value.iter().for_each(|(pen, (s, v))| {
+                    let pen_high_keys = high_keys.entry(*pen).or_insert(HashMap::new());
                     let entry = pen_high_keys.entry(s).or_insert(0.0);
                     *entry += v;
                     total += v;
+
                 });
+                let c = details.quartad.0.chars().next().unwrap();
+                let KeyPress { finger, hand, .. } = pos_map.get_key_position(c).unwrap();
+                let finger_usage = usage
+                    .entry(*hand)
+                    .or_insert(HashMap::new())
+                    .entry(*finger)
+                    .or_insert(0.0);
+                *finger_usage += details.count as f64/corpus.len as f64
             });
 
         LayoutPenalty {
+            usage,
             total,
             high_keys,
             scaled: total / corpus.len as f64,
@@ -210,6 +231,7 @@ impl Layout {
 }
 
 pub struct LayoutPenalty<'a> {
+    pub usage: HashMap<Hand, HashMap<Finger, f64>>,
     pub total: f64,
     pub scaled: f64,
     pub high_keys: HashMap<PenaltyVar, HashMap<&'a str, f64>>,
@@ -218,6 +240,22 @@ pub struct LayoutPenalty<'a> {
 impl Display for LayoutPenalty<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "total: {}, scaled: {}", self.total, self.scaled)?;
+
+        Hand::iter()
+            .map(|hand| {
+                let hand_usage = self.usage.get(&hand).unwrap();
+                write!(f, "{:<6}: ", format!("{}", hand))?;
+                Finger::iter()
+                    .map(|finger| {
+                        let finger_usage = hand_usage.get(&finger).unwrap_or(&0.0);
+                        write!(f, " {}: {:.4}", finger, finger_usage)
+                    })
+                    .collect::<std::fmt::Result>()?;
+                writeln!(f)
+            })
+            .collect::<std::fmt::Result>()?;
+
+        writeln!(f)?;
 
         PenaltyVar::iter()
             .map(|var| self.high_keys.get(&var).zip(Some(var)))
@@ -281,7 +319,7 @@ where
     }
 }
 
-#[derive(EnumIter, PartialEq, Eq, Hash)]
+#[derive(EnumIter, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum PenaltyVar {
     Base,
     SameFinger,
@@ -666,10 +704,12 @@ impl<'a> PenaltyAccumulator for DetailedPenalty<'a> {
     }
 }
 
+#[inline(always)]
 fn is_roll_out(curr: Finger, prev: Finger) -> bool {
     curr > prev
 }
 
+#[inline(always)]
 fn is_roll_in(curr: Finger, prev: Finger) -> bool {
     prev > curr
 }

@@ -5,25 +5,25 @@ use crate::layout;
 use crate::layout::Layout;
 use crate::Result;
 
-const DEFAULT_SWAPS: usize = 3;
-const DEFAULT_TOP_LAYOUTS: usize = 1;
+const DEFAULT_SWAPS: usize = 2;
 
 #[derive(Debug)]
 pub enum Command {
     Run,
     RunRefs,
     Refine,
+    Analyze,
 }
 
-// #[derive(Debug)]
+#[derive(Debug)]
 pub struct Config {
     pub debug: bool,
-    pub top_layouts: usize,
     pub swaps: usize,
     pub command: Command,
     pub corpus_path: PathBuf,
     pub repetition: usize,
     pub layout: Layout,
+    pub output: Option<PathBuf>,
 }
 
 fn print_usage_and_exit(matches: &ArgMatches) -> ! {
@@ -39,13 +39,6 @@ impl Config {
                 Arg::with_name("swaps")
                     .long("swaps-per-iteration")
                     .short("s")
-                    .value_name("COUNT"),
-            )
-            .arg(
-                Arg::with_name("top-layouts")
-                    .long("top-layouts")
-                    .short("t")
-                    .takes_value(true)
                     .value_name("COUNT"),
             )
             .arg(
@@ -74,12 +67,20 @@ impl Config {
                     .takes_value(true)
                     .value_name("PATH"),
             )
+            .arg(
+                Arg::with_name("output")
+                .long("output")
+                .short("o")
+                .takes_value(true)
+                .value_name("PATH")
+            )
             .get_matches();
 
         let layout = match matches.value_of("layout") {
             None => crate::penalty::INIT_LAYOUT.clone(),
             Some(path) => match path {
                 "colemak" => layout::COLEMAK_LAYOUT.clone(),
+                "colemak-dh" => layout::COLEMAK_DH_LAYOUT.clone(),
                 "dvorak" => layout::DVORAK_LAYOUT.clone(),
                 "mtgap" => layout::MTGAP_LAYOUT.clone(),
                 "qwerty" => layout::QWERTY_LAYOUT.clone(),
@@ -108,20 +109,17 @@ impl Config {
                 None => 1,
             },
 
-            top_layouts: match matches.value_of("top-layouts") {
-                Some(s) => str::parse::<usize>(s)
-                    .map_err(|_| format!("Invalid option for '--top-layouts': '{}'", s))?,
-                None => DEFAULT_TOP_LAYOUTS,
-            },
-
             command: match matches.value_of("command").unwrap() {
                 "run" => Command::Run,
                 "run-refs" => Command::RunRefs,
                 "refine" => Command::Refine,
+                "analyze" => Command::Analyze,
                 _ => print_usage_and_exit(&matches),
             },
 
             corpus_path: PathBuf::from(matches.value_of("corpus").unwrap()),
+
+            output: matches.value_of("output").map(|s| PathBuf::from(s)),
 
             layout,
         })

@@ -3,152 +3,170 @@ extern crate itertools;
 extern crate rand;
 
 use self::rand::random;
+use itertools::{FoldWhile, Itertools};
 use rayon::iter::ParallelBridge;
 use rayon::prelude::*;
-use std::cmp::Ordering;
+use std::path::PathBuf;
 
 use crate::annealing;
-use crate::app;
-use crate::layout;
-use crate::penalty;
-use crate::utils;
+use crate::app::{self, Config};
+use crate::layout::{self, Layout};
+use crate::penalty::{self, Corpus};
 use crate::Result;
 
-#[derive(Debug, PartialEq, Clone)]
-struct BestLayoutsEntry {
-    penalty: f64,
-    layout: layout::Layout,
-}
-
-impl PartialOrd for BestLayoutsEntry {
-    fn partial_cmp(&self, other: &BestLayoutsEntry) -> Option<Ordering> {
-        self.penalty.partial_cmp(&other.penalty)
-    }
-}
-
-pub fn run<'a>(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
+pub fn run<'a>(corpus: &Corpus, config: &Config) -> Result<()> {
     let init_penalty = config.layout.penalize_with_details(corpus);
 
-    // Keep track of the best layouts we've encountered.
-    let mut best_layouts = utils::ConstrainedSortedList::new(config.top_layouts);
-    let entry = BestLayoutsEntry {
-        layout: config.layout.clone(),
-        penalty: init_penalty.scaled,
-    };
-    best_layouts.insert_maybe(&entry);
-
-    for n in 0..config.repetition {
-        println!("Started run {}/{}", n + 1, config.repetition);
-
-        let mut accepted_layout = config.layout.clone();
-        let mut accepted_penalty = init_penalty.scaled;
-
-        for i in annealing::get_simulation_range() {
-            // Copy and shuffle this iteration of the layout.
-            let mut curr_layout = accepted_layout.clone();
-            curr_layout.shuffle(random::<usize>() % config.swaps + 1);
-
-            // Calculate penalty.
-            let curr_penalty = curr_layout.par_penalize(corpus) / corpus.len as f64;
-
-            // Probabilistically accept worse transitions; always accept better
-            // transitions.
-            if annealing::accept_transition(curr_penalty - accepted_penalty, i) {
-                if config.debug {
-                    println!(
-                        "Iteration {} accepted with penalty {}. Current: {}",
-                        i, curr_penalty, accepted_penalty
-                    );
-                }
-
-                // Maybe insert this layout into best layouts.
-                let entry = BestLayoutsEntry {
-                    layout: curr_layout,
-                    penalty: curr_penalty,
-                };
-                best_layouts.insert_maybe(&entry);
-
-                accepted_layout = entry.layout;
-                accepted_penalty = curr_penalty;
-            } else {
-                if config.debug {
-                    println!(
-                        "Iteration {} not accepted with penalty {}. Current: {}",
-                        i, curr_penalty, accepted_penalty
-                    );
-                }
-            }
-        }
-    }
+    let best_layout = (0..config.repetition)
+        .map(|n| {
+            println!("Started run {}/{}", n + 1, config.repetition);
+            simulated_annealing(corpus, config) // Returns best layout found during simulation
+        })
+        .min_by(|l1, l2| {
+            let p1 = l1.par_penalize(corpus);
+            let p2 = l2.par_penalize(corpus);
+            p1.partial_cmp(&p2).unwrap()
+        })
+        .unwrap();
+    // .unwrap_or(config.layout.clone());
 
     println!("Initial layout:");
     println!("{}", config.layout);
     println!("{}", init_penalty);
     println!("");
 
-    println!("BestLayouts:");
-    for (i, bl) in best_layouts.iter().enumerate() {
-        let BestLayoutsEntry { layout, .. } = bl;
-        if i == 0 {
-            layout.write_to_file(&"winner.layout")?;
-        }
-        println!("");
-        println!("Place {}:", i + 1);
-        println!("{}", layout);
-        println!("{}", layout.penalize_with_details(corpus));
-    }
+    println!("BestLayout:");
+    println!("{}", best_layout);
+    println!("{}", best_layout.penalize_with_details(corpus));
+    best_layout.write_to_file(
+        config
+            .output
+            .as_ref()
+            .unwrap_or(&PathBuf::from("winner.layout")),
+    )?;
 
     Ok(())
 }
 
-pub fn refine<'a>(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
-    let mut curr_layout = config.layout.clone();
-    let mut curr_penalty = curr_layout.penalize(corpus);
+// Returns best layout found during the simulation, not neccessarily the last one
+fn simulated_annealing(corpus: &Corpus, config: &Config) -> Layout {
+    let init_penalty = config.layout.par_penalize(corpus) / corpus.len as f64;
 
+    let mut best_layout = config.layout.clone();
+    let mut best_penalty = init_penalty;
+
+    annealing::get_simulation_range().fold(
+        (config.layout.clone(), init_penalty),
+        |(accepted_layout, accepted_penalty), i| {
+            // Copy and shuffle this iteration of the layout.
+            let mut new_layout = accepted_layout.clone();
+            new_layout.shuffle(random::<usize>() % config.swaps + 1);
+
+            // Probabilistically accept worse transitions; always accept better
+            // transitions.
+            let new_penalty = new_layout.par_penalize(corpus) / corpus.len as f64;
+
+            if annealing::accept_transition(new_penalty - accepted_penalty, i) {
+                if new_penalty < best_penalty {
+                    best_layout = new_layout.clone();
+                    best_penalty = new_penalty;
+                }
+
+                if config.debug {
+                    println!(
+                        "Iteration {} accepted with penalty {}. Current penalty: {}",
+                        i, new_penalty, accepted_penalty
+                    );
+                }
+                (new_layout, new_penalty)
+            } else {
+                if config.debug {
+                    println!(
+                        "Iteration {} not accepted with penalty {}. Current penalty: {}",
+                        i, new_penalty, accepted_penalty
+                    );
+                }
+                (accepted_layout, accepted_penalty)
+            }
+        },
+    );
+    best_layout
+}
+
+pub fn refine<'a>(corpus: &Corpus, config: &Config) -> Result<()> {
     println!(
         "Start refining with {} swaps and initial layout:",
         config.swaps
     );
-    println!("{}", curr_layout);
-    println!("{}", curr_layout.penalize_with_details(corpus));
+    println!("{}", config.layout);
+    println!("{}", config.layout.penalize_with_details(corpus));
 
     let mut permutations = layout::LayoutPermutations::from_config(&config);
 
-    let mut count = 0;
-    loop {
-        count += 1;
+    let best_layout = (1..)
+        .fold_while(config.layout.clone(), |curr_layout, n| {
+            let curr_penalty = curr_layout.penalize(corpus);
 
-        // Test every layout within `num_swaps` swaps of the initial layout.
-        permutations.set_layout(&curr_layout);
-        let (best_layout, best_penalty) = permutations
-            .iter()
-            .par_bridge()
-            .map(|layout| {
-                let penalty = layout.penalize(corpus);
-                (layout, penalty)
-            })
-            .min_by(|(_, p1), (_, p2)| p1.partial_cmp(&p2).unwrap())
-            .unwrap();
+            // Test every layout within `num_swaps` swaps of the initial layout.
+            permutations.set_layout(&curr_layout);
+            let (best_layout, best_penalty) = permutations
+                .iter()
+                .par_bridge()
+                .map(|layout| {
+                    let penalty = layout.penalize(corpus);
+                    (layout, penalty)
+                })
+                .min_by(|(_, p1), (_, p2)| p1.partial_cmp(&p2).unwrap())
+                .unwrap_or((curr_layout.clone(), curr_penalty));
 
-        // Keep going until swapping doesn't get us any more improvements.
-        if curr_penalty <= best_penalty {
-            break;
-        } else {
-            println!("Result of iteration {}:", count);
-            println!("{}", best_layout);
-            println!("{}", best_layout.penalize_with_details(corpus));
-
-            curr_layout = best_layout;
-            curr_penalty = best_penalty;
-        }
-    }
+            // Keep going until swapping doesn't get us any more improvements.
+            if curr_layout.penalize(corpus) <= best_penalty {
+                FoldWhile::Done(curr_layout)
+            } else {
+                println!("Result of iteration {}:", n);
+                println!("{}", best_layout);
+                println!("{}", best_layout.penalize_with_details(corpus));
+                FoldWhile::Continue(best_layout)
+            }
+        })
+        .into_inner();
 
     println!("");
     println!("Ultimate winner:");
-    println!("{}", curr_layout);
-    println!("{}", curr_layout.penalize_with_details(corpus));
-    curr_layout.write_to_file(&"refined.layout")?;
+    println!("{}", best_layout);
+    println!("{}", best_layout.penalize_with_details(corpus));
+    best_layout.write_to_file(
+        config
+            .output
+            .as_ref()
+            .unwrap_or(&PathBuf::from("refined.layout")),
+    )?;
     Ok(())
+}
+
+pub fn analyze(corpus: &Corpus) -> Result<()> {
+    let mut path = std::env::current_dir()?;
+    path.push("analyze");
+
+    std::fs::read_dir(path)
+        .map_err(|_| "No directory 'analyze' found in current path")?
+        .flatten()
+        .map(|file| -> Result<()> {
+            if file.file_type()?.is_file() {
+                let path = file.path();
+                let layout = Layout::from_string(&std::fs::read_to_string(&path)?).ok_or(
+                    format!("File {} does not contain a valid layout", path.display()),
+                )?;
+                println!(
+                    "Layout: {}",
+                    file.path().file_name().unwrap().to_str().unwrap()
+                );
+                println!("{}", layout);
+                println!("{}", layout.penalize_with_details(corpus));
+            };
+            Ok(())
+        })
+        .collect()
 }
 
 pub fn run_refs(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
@@ -163,6 +181,7 @@ pub fn run_refs(corpus: &penalty::Corpus, config: &app::Config) -> Result<()> {
     penalize_and_print("QWERTY", &layout::QWERTY_LAYOUT);
     // penalize_and_print("DVORAK",&layout::DVORAK_LAYOUT);
     penalize_and_print("COLEMAK", &layout::COLEMAK_LAYOUT);
+    penalize_and_print("COLEMAK-DH", &layout::COLEMAK_DH_LAYOUT);
     // penalize_and_print("QGMLWY", &layout::QGMLWY_LAYOUT);
     penalize_and_print("WORKMAN", &layout::WORKMAN_LAYOUT);
     // penalize_and_print("MALTRON",&layout::MALTRON_LAYOUT);
