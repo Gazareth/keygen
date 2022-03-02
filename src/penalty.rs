@@ -6,12 +6,21 @@
 pub static INIT_LAYOUT: &Layout = &layout::RSTHD_LAYOUT;
 
 // Base penalty.
-const BASE_PENALTY_MULTIPLICATOR: f64 = 1.0;
+const BASE_PENALTY_MULTIPLICATOR: f64 = 0.75; 
+//static BASE_PENALTY: KeyMap<f64> = KeyMap([
+//    2.5, 0.5, 0.5, 1.0, 2.5, 2.5, 1.0, 0.5, 0.5, 2.5, //
+//    0.5, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.5, //
+//    1.5, 1.5, 1.0, 0.5, 3.0, 3.0, 0.5, 1.0, 1.5, 1.5, //
+//    0.0, 0.0,
+//]);
+
+// new trial
 static BASE_PENALTY: KeyMap<f64> = KeyMap([
-    2.5, 0.5, 0.5, 1.0, 2.5, 2.5, 1.0, 0.5, 0.5, 2.5, //
-    0.5, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.5, //
-    1.5, 1.5, 1.0, 0.5, 3.0, 3.0, 0.5, 1.0, 1.5, 1.5, //
-    0.0, 0.0,
+    4.5  , 1.5  , 1.5 , 4.0 , 4.75 , 3.25 , 2.5 , 1.5 , 1.5 , 4.5, 6.0,
+    4.0  , 1.0  , 1.0 , 3.5 , 4.25 , 2.75 , 2.0 , 1.0 , 1.0 , 4.0, 5.0,
+    4.5  , 1.5  , 1.5 , 4.0 , 4.75 , 3.25 , 2.5 , 1.5 , 1.5 , 4.5,
+    0.0  , 0.0,
+    0.5  , 0.5
 ]);
 //
 // Penalise 30 points for using the same finger twice on different keys.
@@ -76,9 +85,10 @@ const TWIST_PENALTY: Option<f64> = Some(10.0);
 // Mask for which keys are allowed to be shuffled around
 #[rustfmt::skip]
 pub const LAYOUT_MASK: KeyMap<bool> = KeyMap([
+	true,  true,  true,  true,  true,  true,  true,  true,  true,  true, true,
+	true,  true,  true,  true,  true,  true,  true,  true,  true,  true, true,
 	true,  true,  true,  true,  true,  true,  true,  true,  true,  true,
-	true,  true,  true,  true,  true,  true,  true,  true,  true,  true,
-	true,  true,  true,  true,  true,  true,  true,  true,  true,  true,
+                                true,  true,
                                 true,  true,
 ]);
 
