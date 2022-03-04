@@ -6,7 +6,7 @@
 pub static INIT_LAYOUT: &Layout = &layout::RSTHD_LAYOUT;
 
 // Base penalty.
-const BASE_PENALTY_MULTIPLICATOR: f64 = 0.75; 
+const BASE_PENALTY_MULTIPLICATOR: f64 = 0.8; 
 //static BASE_PENALTY: KeyMap<f64> = KeyMap([
 //    2.5, 0.5, 0.5, 1.0, 2.5, 2.5, 1.0, 0.5, 0.5, 2.5, //
 //    0.5, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.5, //
@@ -16,11 +16,11 @@ const BASE_PENALTY_MULTIPLICATOR: f64 = 0.75;
 
 // new trial
 static BASE_PENALTY: KeyMap<f64> = KeyMap([
-    4.5  , 1.5  , 1.5 , 4.0 , 4.75 , 3.25 , 2.5 , 1.5 , 1.5 , 4.5, 6.0,
-    4.0  , 1.0  , 1.0 , 3.5 , 4.25 , 2.75 , 2.0 , 1.0 , 1.0 , 4.0, 5.0,
-    4.5  , 1.5  , 1.5 , 4.0 , 4.75 , 3.25 , 2.5 , 1.5 , 1.5 , 4.5,
-    0.0  , 0.0,
-    0.5  , 0.5
+    5.5  , 1.5  , 1.5 , 4.0 , 4.75, /**/ 3.25 , 2.5 , 1.5 , 1.5 , 5.5,10.0,
+    3.0  , 1.0  , 1.0 , 3.5 , 4.25, /**/ 2.75 , 2.0 , 1.0 , 1.0 , 3.0, 8.0,
+    4.5  , 1.75 , 1.75, 4.0 , 4.75, /**/ 3.25 , 2.5 , 1.75, 1.75, 4.5,
+                               0.0, /**/ 0.0,
+                               0.5, /**/ 0.5
 ]);
 //
 // Penalise 30 points for using the same finger twice on different keys.
@@ -380,6 +380,7 @@ mod penalties {
     #[inline(always)]
     pub fn base(kp_quartad: &KeyPressQuartad) -> Penalty {
         let KeyPressQuartad { curr, .. } = kp_quartad;
+
         Penalty {
             kind: Base,
             relevant_keys: 1,
@@ -395,11 +396,25 @@ mod penalties {
             kind: SameFinger,
             relevant_keys: 2,
             value: if curr.finger == old1.finger && curr.pos != old1.pos {
-                SAME_FINGER_PENALTY.map(|p| {
+                let penalty = SAME_FINGER_PENALTY.map(|p| {
                     p * (1.0
                         + if curr.center { 1.0 } else { 0.0 }
                         + if old1.center { 1.0 } else { 0.0 })
-                })
+                });
+
+                // TODO testing reducing same finger penalty for thumb
+                if curr.finger == Finger::Thumb {
+                    // really hard to get alg to put anything next to space for thumb
+                    // try to encourage this
+                    if curr.kc == ' ' || old1.kc == ' ' {
+                        penalty.map(|p| {p* 0.2})
+                    // be ok with some same finger thumb in general
+                    } else {
+                        penalty.map(|p| {p* 0.5})
+                    }
+                } else {
+                    penalty
+                }
             } else {
                 None
             },
