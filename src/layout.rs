@@ -323,9 +323,9 @@ static KEY_CENTER_COLUMN: KeyMap<bool> = KeyMap([
 static LAYOUT_FILE_IDXS: KeyMap<usize> = KeyMap([
     0,  1,  2,  3,  4,  6,  7,  8,  9,  10, 11,
     13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24,
-    26, 26, 27, 28, 29, 31, 32, 33, 34, 35, 
-    41, 43,
-    49, 51,
+    26, 27, 28, 29, 30, 32, 33, 34, 35, 36, 
+    42, 44,
+    50, 52,
 ]);
 
 impl From<&Layout> for LayoutPosMap {
@@ -369,7 +369,7 @@ impl Layout {
         let mut lower: [char; 36] = ['\0'; 36];
         let mut upper: [char; 36] = ['\0'; 36];
 
-        for i in 0..34 {
+        for i in 0..36 {
             let file_i = LAYOUT_FILE_IDXS.0[i];
             lower[i] = *s.get(file_i)?;
             upper[i] = *s.get(file_i + 44)?;
