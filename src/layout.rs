@@ -358,8 +358,8 @@ impl Layout {
             upper[10], upper[11], upper[12], upper[13], upper[14], upper[15], upper[16], upper[17], upper[18], upper[19],
             upper[20], upper[21], upper[22], upper[23], upper[24], upper[25], upper[26], upper[27], upper[28], upper[29],
             upper[30], upper[31],
-            lower[32], lower[33],
-            lower[34], lower[35],
+            upper[32], upper[33],
+            upper[34], upper[35],
         )?;
         Ok(())
     }
@@ -372,7 +372,7 @@ impl Layout {
         for i in 0..36 {
             let file_i = LAYOUT_FILE_IDXS.0[i];
             lower[i] = *s.get(file_i)?;
-            upper[i] = *s.get(file_i + 44)?;
+            upper[i] = *s.get(file_i + 54)?;
         }
 
         Some(Layout(Layer(KeyMap(lower)), Layer(KeyMap(upper))))
