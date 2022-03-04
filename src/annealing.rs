@@ -1,8 +1,8 @@
 /// Stochaistic optimisation based on simulated annealing.
 /// Math is shamelessly taken from: http://mkweb.bcgsc.ca/carpalx/?simulated_annealing
 /// This code is written to be generic and can be reused for other applications.
-use rand::thread_rng;
 use rand::Rng;
+use rand::StdRng;
 use std::f64;
 use std::ops::Range;
 
@@ -28,12 +28,12 @@ fn cutoff_p(de: f64, i: usize) -> f64 {
 }
 
 // For positive dE, accept if r < p_dE where r ~ Uniform(0, 1)
-pub fn accept_transition(de: f64, i: usize) -> bool {
+pub fn accept_transition(de: f64, i: usize, rng: &mut StdRng) -> bool {
     if de <= 0.0 {
         true
     } else {
         let p_de = cutoff_p(de, i);
-        let r = thread_rng().next_f64();
+        let r = rng.next_f64();
         r < p_de
     }
 }

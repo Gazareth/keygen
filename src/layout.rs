@@ -2,7 +2,7 @@
 use crate::penalty;
 use crate::Result;
 use itertools::Itertools;
-use rand::random;
+use rand::{Rng, StdRng};
 /// Data structures and methods for creating and shuffling keyboard layouts.
 use std::fmt::{self, Display};
 use std::fs::File;
@@ -378,9 +378,9 @@ impl Layout {
         Some(Layout(Layer(KeyMap(lower)), Layer(KeyMap(upper))))
     }
 
-    pub fn shuffle(&mut self, times: usize) {
+    pub fn shuffle(&mut self, times: usize, rng: &mut StdRng) {
         for _ in 0..times {
-            let (i, j) = Layout::shuffle_position();
+            let (i, j) = Layout::shuffle_position(rng);
             if penalty::LAYOUT_MASK.0[i] && penalty::LAYOUT_MASK.0[j] {
                 let Layout(ref mut lower, ref mut upper) = *self;
                 lower.swap(i, j);
@@ -398,9 +398,9 @@ impl Layout {
         LayoutPosMap(map)
     }
 
-    fn shuffle_position() -> (usize, usize) {
-        let i = random::<usize>() % LAYOUT_MASK_NUM_SWAPPABLE;
-        let mut j = random::<usize>() % (LAYOUT_MASK_NUM_SWAPPABLE - 1);
+    fn shuffle_position(rng: &mut StdRng) -> (usize, usize) {
+        let i = rng.gen_range(0, LAYOUT_MASK_NUM_SWAPPABLE);
+        let mut j = rng.gen_range(0, LAYOUT_MASK_NUM_SWAPPABLE-1);
         if j >= i {
             j += 1;
         }

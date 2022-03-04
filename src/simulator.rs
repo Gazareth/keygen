@@ -2,7 +2,6 @@ extern crate itertools;
 /// Applies the math in annealing.rs to keyboard layouts.
 extern crate rand;
 
-use self::rand::random;
 use itertools::{FoldWhile, Itertools};
 use rayon::iter::ParallelBridge;
 use rayon::prelude::*;
@@ -13,6 +12,8 @@ use crate::app::{self, Config};
 use crate::layout::{self, Layout};
 use crate::penalty::{self, Corpus};
 use crate::Result;
+use rand::Rng;
+use rand::{SeedableRng, StdRng};
 
 pub fn run<'a>(corpus: &Corpus, config: &Config) -> Result<()> {
     let init_penalty = config.layout.penalize_with_details(corpus);
@@ -55,18 +56,21 @@ fn simulated_annealing(corpus: &Corpus, config: &Config) -> Layout {
     let mut best_layout = config.layout.clone();
     let mut best_penalty = init_penalty;
 
+    let seed: &[_] = &[1, 2, 3, 4];
+    let mut rng : StdRng = SeedableRng::from_seed(seed);
+
     annealing::get_simulation_range().fold(
         (config.layout.clone(), init_penalty),
         |(accepted_layout, accepted_penalty), i| {
             // Copy and shuffle this iteration of the layout.
             let mut new_layout = accepted_layout.clone();
-            new_layout.shuffle(random::<usize>() % config.swaps + 1);
+            new_layout.shuffle(1+rng.gen_range(0,config.swaps), &mut rng);
 
             // Probabilistically accept worse transitions; always accept better
             // transitions.
             let new_penalty = new_layout.par_penalize(corpus) / corpus.len as f64;
 
-            if annealing::accept_transition(new_penalty - accepted_penalty, i) {
+            if annealing::accept_transition(new_penalty - accepted_penalty, i, &mut rng) {
                 if new_penalty < best_penalty {
                     best_layout = new_layout.clone();
                     best_penalty = new_penalty;
