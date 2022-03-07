@@ -1,27 +1,32 @@
-/*****************
- * Configuration *
- *****************/
 
 // Default layout
 pub static INIT_LAYOUT: &Layout = &layout::RSTHD_LAYOUT;
 
 // Base penalty.
-const BASE_PENALTY_MULTIPLICATOR: f64 = 0.8; 
-//static BASE_PENALTY: KeyMap<f64> = KeyMap([
-//    2.5, 0.5, 0.5, 1.0, 2.5, 2.5, 1.0, 0.5, 0.5, 2.5, //
-//    0.5, 0.0, 0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.5, //
-//    1.5, 1.5, 1.0, 0.5, 3.0, 3.0, 0.5, 1.0, 1.5, 1.5, //
-//    0.0, 0.0,
-//]);
+const BASE_PENALTY_MULTIPLICATOR: f64 = 0.70; 
 
-// new trial
+// left index penalty
+static LI: f64 = 1.75;
+// examples of how this ends up affecting ratio
+// LI penalty --> LI usage after run (assume base multiplicator is 1.0)
+// 1.0  --> 0.0749 (vs 0.0932 right)
+// 1.5  --> 0.0710 (vs 0.1080)
+// 1.75 --> 0.0412 (vs 0.0872)
+// 2.0  --> 0.0421 (vs 0.1297)
+
+// right hand penalty, <1 to favor more right hand usage (excludes thumbs & pinky reach)
+static RH: f64 = 1.0;
+
+// roughly based on BEAKL https://deskthority.net/wiki/BEAKL
+// but adapted based on disagreements
 static BASE_PENALTY: KeyMap<f64> = KeyMap([
-    5.5  , 1.5  , 1.5 , 4.0 , 4.75, /**/ 3.25 , 2.5 , 1.5 , 1.5 , 5.5,10.0,
-    3.0  , 1.0  , 1.0 , 3.5 , 4.25, /**/ 2.75 , 2.0 , 1.0 , 1.0 , 3.0, 8.0,
-    4.5  , 1.75 , 1.75, 4.0 , 4.75, /**/ 3.25 , 2.5 , 1.75, 1.75, 4.5,
-                               0.0, /**/ 0.0,
-                               0.5, /**/ 0.5
+    5.5  , 1.5  , 1.5 , 2.5*LI , 4.5*LI , /**/  4.5*RH , 2.5*RH , 1.5*RH , 1.5*RH , 5.5*RH,10.0,
+    3.0  , 1.0  , 1.0 , 2.0*LI , 3.5*LI , /**/  3.5*RH , 2.0*RH , 1.0*RH , 1.0*RH , 3.0*RH, 8.0,
+    4.5  , 2.0  , 2.0 , 2.5*LI , 5.5*LI , /**/  5.5*RH , 2.5*RH , 2.0*RH , 2.0*RH , 4.5*RH,
+                                 0.0     , /**/  0.0 ,
+                                 0.5     , /**/  0.5
 ]);
+
 //
 // Penalise 30 points for using the same finger twice on different keys.
 // An extra penalty of the same amount for each usage of the center row.
@@ -89,7 +94,8 @@ pub const LAYOUT_MASK: KeyMap<bool> = KeyMap([
 	true,  true,  true,  true,  true,  true,  true,  true,  true,  true, true,
 	true,  true,  true,  true,  true,  true,  true,  true,  true,  true,
                                 true,  true,
-                                true,  true,
+                                // TODO temporarily disabling muti thumb
+                                false,  false,
 ]);
 
 /*********************
@@ -404,14 +410,7 @@ mod penalties {
 
                 // TODO testing reducing same finger penalty for thumb
                 if curr.finger == Finger::Thumb {
-                    // really hard to get alg to put anything next to space for thumb
-                    // try to encourage this
-                    if curr.kc == ' ' || old1.kc == ' ' {
-                        penalty.map(|p| {p* 0.2})
-                    // be ok with some same finger thumb in general
-                    } else {
-                        penalty.map(|p| {p* 0.5})
-                    }
+                    penalty.map(|p| {p* 0.75})
                 } else {
                     penalty
                 }
