@@ -1,3 +1,4 @@
+use num_format::{Locale, Buffer};
 
 // Default layout
 pub static INIT_LAYOUT: &Layout = &layout::RSTHD_LAYOUT;
@@ -255,41 +256,46 @@ pub struct LayoutPenalty<'a> {
 
 impl Display for LayoutPenalty<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "total: {}, scaled: {}", self.total, self.scaled)?;
+        // Create a stack-allocated buffer...
+        let total_int = self.total as i64;
+        let mut buf = Buffer::default();
+        buf.write_formatted(&total_int, &Locale::en);
+        writeln!(f, "total: {}, scaled: {}", buf, self.scaled)?;
 
-        Hand::iter()
-            .map(|hand| {
-                let hand_usage = self.usage.get(&hand).unwrap();
-                write!(f, "{:<6}: ", format!("{}", hand))?;
-                Finger::iter()
-                    .map(|finger| {
-                        let finger_usage = hand_usage.get(&finger).unwrap_or(&0.0);
-                        write!(f, " {}: {:.4}", finger, finger_usage)
-                    })
-                    .collect::<std::fmt::Result>()?;
-                writeln!(f)
-            })
-            .collect::<std::fmt::Result>()?;
+        // Hand::iter()
+        //     .map(|hand| {
+        //         let hand_usage = self.usage.get(&hand).unwrap();
+        //         write!(f, "{:<6}: ", format!("{}", hand))?;
+        //         Finger::iter()
+        //             .map(|finger| {
+        //                 let finger_usage = hand_usage.get(&finger).unwrap_or(&0.0);
+        //                 write!(f, " {}: {:.4}", finger, finger_usage)
+        //             })
+        //             .collect::<std::fmt::Result>()?;
+        //         writeln!(f)
+        //     })
+        //     .collect::<std::fmt::Result>()?;
 
-        writeln!(f)?;
+        // writeln!(f)?;
+        writeln!(f)
 
-        PenaltyVar::iter()
-            .map(|var| self.high_keys.get(&var).zip(Some(var)))
-            .flatten()
-            .map(|(pen_high_keys, var)| {
-                let mut pen_high_keys: Vec<(&str, f64)> =
-                    pen_high_keys.iter().map(|(&s, &v)| (s, v)).collect();
-                pen_high_keys.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                let pen_total: f64 = pen_high_keys.iter().map(|&(_, x)| -> f64 { x }).sum();
-                write!(f, "{:22}: {:11} ", format!("{}", var), pen_total)?;
-                pen_high_keys
-                    .iter()
-                    .take(5)
-                    .map(|(chars, pen)| write!(f, " | {:4} : {:10}", chars, pen))
-                    .collect::<Result<(), std::fmt::Error>>()?;
-                writeln!(f, "")
-            })
-            .collect()
+        // PenaltyVar::iter()
+        //     .map(|var| self.high_keys.get(&var).zip(Some(var)))
+        //     .flatten()
+        //     .map(|(pen_high_keys, var)| {
+        //         let mut pen_high_keys: Vec<(&str, f64)> =
+        //             pen_high_keys.iter().map(|(&s, &v)| (s, v)).collect();
+        //         pen_high_keys.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        //         let pen_total: f64 = pen_high_keys.iter().map(|&(_, x)| -> f64 { x }).sum();
+        //         write!(f, "{:22}: {:11} ", format!("{}", var), pen_total)?;
+        //         pen_high_keys
+        //             .iter()
+        //             .take(5)
+        //             .map(|(chars, pen)| write!(f, " | {:4} : {:10}", chars, pen))
+        //             .collect::<Result<(), std::fmt::Error>>()?;
+        //         writeln!(f, "")
+        //     })
+        //     .collect()
     }
 }
 
