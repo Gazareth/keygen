@@ -14,6 +14,8 @@ use crate::penalty::{self, Corpus};
 use crate::Result;
 use rand::Rng;
 use rand::{SeedableRng, StdRng};
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering;
 
 pub fn run<'a>(corpus: &Corpus, config: &Config) -> Result<()> {
     let init_penalty = config.layout.penalize_with_details(corpus);
@@ -107,6 +109,9 @@ pub fn refine<'a>(corpus: &Corpus, config: &Config) -> Result<()> {
 
     let mut permutations = layout::LayoutPermutations::from_config(&config);
 
+    let penalised_count = AtomicI64::new(0);
+    let penalised_reported = AtomicI64::new(0);
+
     let best_layout = (1..)
         .fold_while(config.layout.clone(), |curr_layout, n| {
             let curr_penalty = curr_layout.penalize(corpus);
@@ -118,6 +123,12 @@ pub fn refine<'a>(corpus: &Corpus, config: &Config) -> Result<()> {
                 .par_bridge()
                 .map(|layout| {
                     let penalty = layout.penalize(corpus);
+                    let local_count = penalised_count.fetch_add(1, Ordering::SeqCst);
+                    let local_reported = penalised_reported.load(Ordering::SeqCst);
+                    if local_count > (local_reported + 10000) { 
+                        penalised_reported.fetch_add(10000,Ordering::SeqCst);
+                        println!("Penalised a further 10k. Running count: {}", local_count);
+                    }
                     (layout, penalty)
                 })
                 .min_by(|(_, p1), (_, p2)| p1.partial_cmp(&p2).unwrap())

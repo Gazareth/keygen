@@ -12,6 +12,7 @@ strum = "0.21"
 strum_macros = "0.21"
 rayon = "1.5.1"
 num-format = "0.4.3"
+dyn-fmt = "0.3.0"
 
 [profile.dev]
 opt-level = 3

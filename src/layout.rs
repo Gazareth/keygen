@@ -10,6 +10,10 @@ use std::io::Write;
 use std::path::Path;
 use strum_macros::EnumIter;
 
+use dyn_fmt::AsStrFormatExt;
+
+use num_format::{Locale, Buffer};
+
 // KeyMap format:
 //    LEFT HAND   |    RIGHT HAND
 //  0  1  2  3  4 |  5  6  7  8  9 x
@@ -472,9 +476,13 @@ impl LayoutPermutations {
     }
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = Layout> + Send + 'a {
-        self.swaps
+        let perms = self.swaps
             .iter()
-            .permutations(self.swaps_per_iteration)
+            .permutations(self.swaps_per_iteration);
+
+        println!("{:?}", perms);
+
+        let perm_layouts = perms
             .map(move |perm: Vec<&(usize, usize)>| {
                 let mut layout = self.orig_layout.clone();
                 let ref mut lower = ((layout.0).0).0;
@@ -483,8 +491,16 @@ impl LayoutPermutations {
                     lower.swap(*i, *j);
                     upper.swap(*i, *j);
                 });
+
                 layout
-            })
+            });
+
+        let perms_len = perm_layouts.clone().collect::<Vec<Layout>>().len();
+        let mut buf = Buffer::default();
+        buf.write_formatted(&perms_len, &Locale::en);
+        println!("Got {} permutations.", buf);
+
+        perm_layouts
     }
 }
 
@@ -499,56 +515,40 @@ impl Display for Layout {
 }
 
 impl Display for Layer {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+       fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            self.fmt_terse(f)
+       }
+}
+
+trait DisplayHandler {
+    fn fmt_raw(&self, f: &mut fmt::Formatter, layout_str: &str) -> fmt::Result;
+    fn fmt_long(&self, f: &mut fmt::Formatter) -> fmt::Result;
+    fn fmt_terse(&self, f: &mut fmt::Formatter) -> fmt::Result;
+}
+
+impl DisplayHandler for Layer {
+    fn fmt_raw(&self, f: &mut fmt::Formatter, layout_str: &str) -> fmt::Result {
         let Layer(KeyMap(ref layer)) = *self;
         let layer: Vec<_> = layer
             .iter()
             .map(|c| if *c != '\0' { *c } else { '☐' })
             .collect();
-        write!(
-            f,
-            "\
+        let formatted_layout = layout_str.format(&layer);
+        write!(f, "{}", formatted_layout)
+    }
+
+    fn fmt_long(&self, f: &mut fmt::Formatter) -> fmt::Result {
+         self.fmt_raw(f, "\
 {} {} {} {} {} | {} {} {} {} {} {}
 {} {} {} {} {} | {} {} {} {} {} {}
 {} {} {} {} {} | {} {} {} {} {}
         {} | {}
-        {} | {}",
-            layer[0],
-            layer[1],
-            layer[2],
-            layer[3],
-            layer[4],
-            layer[5],
-            layer[6],
-            layer[7],
-            layer[8],
-            layer[9],
-            layer[10],
-            layer[11],
-            layer[12],
-            layer[13],
-            layer[14],
-            layer[15],
-            layer[16],
-            layer[17],
-            layer[18],
-            layer[19],
-            layer[20],
-            layer[21],
-            layer[22],
-            layer[23],
-            layer[24],
-            layer[25],
-            layer[26],
-            layer[27],
-            layer[28],
-            layer[29],
-            layer[30],
-            layer[31],
-            layer[32],
-            layer[33],
-            layer[34],
-            layer[35]
-        )
+        {} | {}"
+)
     }
+
+    fn fmt_terse(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.fmt_raw(f, "\
+{}{}{}{}{} {}{}{}{}{}{}|{}{}{}{}{} {}{}{}{}{}{}|{}{}{}{}{} {}{}{}{}{}|{} {}|{}{}")
+}
 }
